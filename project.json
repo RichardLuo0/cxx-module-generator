@@ -1,0 +1,8 @@
+{
+  "name": "cxx-module-generator",
+  "dev": {
+    "packages": [
+      "makeDotCpp"
+    ]
+  }
+}

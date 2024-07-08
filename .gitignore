@@ -1,0 +1,7 @@
+.*
+!.clang-format
+!.gitignore
+!.clangd
+build
+tests
+compile_commands.json
