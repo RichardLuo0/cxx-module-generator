@@ -1,14 +1,16 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/RecursiveASTVisitor.h>
-#include <clang/AST/Type.h>
-#include <clang/Frontend/CompilerInstance.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
-#include <llvm/Support/raw_ostream.h>
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <ranges>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace clang;
 using namespace tooling;
@@ -27,29 +29,61 @@ static llvm::cl::opt<std::string> nsFilter(
 
 class ModuleWrapper {
  private:
-  std::string content;
+  fs::path originalFile;
+
+  struct Ns {
+    std::unordered_set<std::string> symbols;
+    std::unordered_map<std::string, Ns> nss;
+  } topLevel;
 
  public:
-  ModuleWrapper(const fs::path &originalFile) {
+  ModuleWrapper(const fs::path &file) : originalFile(file) {}
+
+  void addSymbol(NamedDecl *decl) {
+    if (decl != nullptr && decl->isFirstDecl()) {
+      auto qName = decl->getQualifiedNameAsString();
+      std::deque<const std::string_view> qNameSplit;
+      for (const auto ns : std::views::split(qName, std::string_view("::"))) {
+        std::string_view nsSv(ns.begin(), ns.end());
+        if (nsSv != "(anonymous namespace)") qNameSplit.emplace_back(nsSv);
+      }
+      std::string symbol;
+      std::reference_wrapper<Ns> cur = topLevel;
+      for (auto &ns : qNameSplit | std::views::take(qNameSplit.size() - 1)) {
+        cur = cur.get().nss[std::string(ns)];
+        symbol += std::string(ns) + "::";
+      }
+      symbol += qNameSplit.back();
+
+      cur.get().symbols.emplace("using " + symbol);
+    }
+  }
+
+ private:
+  std::string nsToString(const Ns &ns) const {
+    std::string content;
+    for (const std::string &symbol : ns.symbols) {
+      content += "export " + symbol + ";\n";
+    }
+    for (const auto &ns : ns.nss) {
+      content += "namespace " + ns.first + " {\n";
+      content += nsToString(ns.second);
+      content += "}\n";
+    }
+    return content;
+  }
+
+ public:
+  std::string toString() const {
+    std::string content;
     content += "module;\n#include \"" + originalFile.generic_string() + "\"\n";
     content += "export module " +
                (!moduleName.empty() ? moduleName.getValue()
                                     : originalFile.stem().string()) +
                ";\n";
+    content += nsToString(topLevel);
+    return content;
   }
-
-  void openNamespace(NamespaceDecl *decl) {
-    content += "namespace " + decl->getNameAsString() + " {\n";
-  }
-
-  void closeNamespace(NamespaceDecl *) { content += "}\n"; }
-
-  void addSymbol(NamedDecl *decl) {
-    if (decl != nullptr && decl->isFirstDecl())
-      content += "export using " + decl->getQualifiedNameAsString() + ";\n";
-  }
-
-  const std::string &getContent() const { return content; }
 };
 
 class FindAllSymbols : public RecursiveASTVisitor<FindAllSymbols> {
@@ -60,15 +94,6 @@ class FindAllSymbols : public RecursiveASTVisitor<FindAllSymbols> {
 
  public:
   FindAllSymbols(ModuleWrapper &wrapper) : wrapper(wrapper) {}
-
-  bool TraverseNamespaceDecl(NamespaceDecl *decl) {
-    if (nsFilter.find(decl->getName()) != std::string::npos) {
-      wrapper.openNamespace(decl);
-      Base::TraverseNamespaceDecl(decl);
-      wrapper.closeNamespace(decl);
-    }
-    return true;
-  }
 
   bool TraverseDecl(Decl *decl) {
     switch (decl->getKind()) {
@@ -103,25 +128,31 @@ class FindAllSymbols : public RecursiveASTVisitor<FindAllSymbols> {
   VISIT_DECL(Tag);
   VISIT_DECL(TypedefName);
   VISIT_DECL(Function);
+  VISIT_DECL(Var);
 #undef VISIT_DECL
 };
 
 class CreateModule : public ASTConsumer {
  private:
-  fs::path path;
+  fs::path modulePath;
+  ModuleWrapper wrapper;
+  FindAllSymbols visitor;
 
  public:
-  CreateModule(const fs::path &path) : path(fs::canonical(path)) {}
+  CreateModule(const fs::path &path)
+      : modulePath(output.getValue() / path.stem() += ".cppm"),
+        wrapper(fs::canonical(path)),
+        visitor(wrapper) {}
 
-  void HandleTranslationUnit(ASTContext &ctx) override {
-    ModuleWrapper wrapper(path);
-    FindAllSymbols visitor(wrapper);
-    visitor.TraverseDecl(ctx.getTranslationUnitDecl());
-    auto modulePath = output.getValue() / path.stem() += ".cppm";
+  ~CreateModule() {
     fs::create_directories(modulePath.parent_path());
     std::ofstream os{modulePath, std::ios::binary};
     os.exceptions(std::ios::failbit);
-    os << wrapper.getContent();
+    os << wrapper.toString();
+  }
+
+  void HandleTranslationUnit(ASTContext &ctx) override {
+    visitor.TraverseDecl(ctx.getTranslationUnitDecl());
   }
 };
 
