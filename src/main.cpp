@@ -130,8 +130,8 @@ class FindAllSymbols : public RecursiveASTVisitor<FindAllSymbols> {
   VISIT_DECL(Tag);
   VISIT_DECL(TypedefName);
   VISIT_DECL(Function);
-  VISIT_DECL(FunctionTemplate);
   VISIT_DECL(Var);
+  VISIT_DECL(Template);
 #undef VISIT_DECL
 };
 
