@@ -5,7 +5,6 @@
 
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <ranges>
 #include <string_view>
@@ -40,23 +39,26 @@ class ModuleWrapper {
   ModuleWrapper(const fs::path &file) : originalFile(file) {}
 
   void addSymbol(NamedDecl *decl) {
-    if (decl != nullptr && decl->isFirstDecl()) {
-      auto qName = decl->getQualifiedNameAsString();
-      std::deque<const std::string_view> qNameSplit;
-      for (const auto ns : std::views::split(qName, std::string_view("::"))) {
-        std::string_view nsSv(ns.begin(), ns.end());
-        if (nsSv != "(anonymous namespace)") qNameSplit.emplace_back(nsSv);
-      }
-      std::string symbol;
-      std::reference_wrapper<Ns> cur = topLevel;
-      for (auto &ns : qNameSplit | std::views::take(qNameSplit.size() - 1)) {
-        cur = cur.get().nss[std::string(ns)];
-        symbol += std::string(ns) + "::";
-      }
-      symbol += qNameSplit.back();
+    if (decl == nullptr || !decl->isFirstDecl()) return;
 
-      cur.get().symbols.emplace("using " + symbol);
+    auto qName = decl->getQualifiedNameAsString();
+    std::deque<const std::string_view> qNameSplit;
+    for (const auto ns : std::views::split(qName, std::string_view("::"))) {
+      std::string_view nsSv(ns.begin(), ns.end());
+      if (nsSv != "(anonymous namespace)") qNameSplit.emplace_back(nsSv);
     }
+    std::string symbol;
+    std::reference_wrapper<Ns> cur = topLevel;
+    for (auto &ns : qNameSplit | std::views::take(qNameSplit.size() - 1)) {
+      cur = cur.get().nss[std::string(ns)];
+      symbol += std::string(ns) + "::";
+    }
+    symbol += qNameSplit.back();
+
+    if (decl->getLinkageInternal() == Linkage::Internal) {
+      llvm::errs() << qName + " has internal linkage. Skipping.\n";
+    } else
+      cur.get().symbols.emplace("using " + symbol);
   }
 
  private:
@@ -128,6 +130,7 @@ class FindAllSymbols : public RecursiveASTVisitor<FindAllSymbols> {
   VISIT_DECL(Tag);
   VISIT_DECL(TypedefName);
   VISIT_DECL(Function);
+  VISIT_DECL(FunctionTemplate);
   VISIT_DECL(Var);
 #undef VISIT_DECL
 };
