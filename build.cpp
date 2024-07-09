@@ -23,7 +23,7 @@ int main(int argc, const char **argv) {
   op.parse(argc, argv);
 
   auto compiler = std::make_shared<Clang>();
-  compiler->addOption("-march=native -std=c++20 -O3 -Wall")
+  compiler->addOption("-std=c++20 -O3 -Wall")
       .addLinkOption("-lclang-cpp")
       .addLinkOption("-lLLVM-18")
       .addLinkOption("-Wl,--stack=4194304");
