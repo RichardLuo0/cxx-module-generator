@@ -55,3 +55,5 @@ Use `find path/in/subtree -name '*.hpp' | xargs cmg --namespace=a::b --` if you 
 
 ## Tested library
 * boost.json
+* boost.program_options
+* ~~boost.process~~: `std_out` and `std_err` have internal linkage. no matching function for call to `boost::vector_detail::value_at_impl`
