@@ -1,5 +1,6 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/RecursiveASTVisitor.h>
+#include <clang/Frontend/CompilerInstance.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
 
@@ -28,7 +29,7 @@ static llvm::cl::opt<std::string> nsFilter(
 
 class ModuleWrapper {
  private:
-  fs::path originalFile;
+  fs::path file;
 
   struct Ns {
     std::unordered_set<std::string> symbols;
@@ -36,7 +37,7 @@ class ModuleWrapper {
   } topLevel;
 
  public:
-  ModuleWrapper(const fs::path &file) : originalFile(file) {}
+  ModuleWrapper(const fs::path &file) : file(file) {}
 
   void addSymbol(NamedDecl *decl) {
     if (decl == nullptr || !decl->isFirstDecl()) return;
@@ -76,13 +77,10 @@ class ModuleWrapper {
   }
 
  public:
-  std::string toString() const {
+  std::string toString(const std::string &name) const {
     std::string content;
-    content += "module;\n#include \"" + originalFile.generic_string() + "\"\n";
-    content += "export module " +
-               (!moduleName.empty() ? moduleName.getValue()
-                                    : originalFile.stem().string()) +
-               ";\n";
+    content += "module;\n#include \"" + file.generic_string() + "\"\n";
+    content += "export module " + name + ";\n";
     content += nsToString(topLevel);
     return content;
   }
@@ -142,7 +140,7 @@ class CreateModule : public ASTConsumer {
   FindAllSymbols visitor;
 
  public:
-  CreateModule(const fs::path &path)
+  CreateModule(CompilerInstance &, const fs::path &path)
       : modulePath(output.getValue() / path.stem() += ".cppm"),
         wrapper(fs::canonical(path)),
         visitor(wrapper) {}
@@ -151,7 +149,9 @@ class CreateModule : public ASTConsumer {
     fs::create_directories(modulePath.parent_path());
     std::ofstream os{modulePath, std::ios::binary};
     os.exceptions(std::ios::failbit);
-    os << wrapper.toString();
+    os << wrapper.toString(!moduleName.empty()
+                               ? moduleName.getValue()
+                               : modulePath.stem().generic_string());
   }
 
   void HandleTranslationUnit(ASTContext &ctx) override {
@@ -160,11 +160,11 @@ class CreateModule : public ASTConsumer {
 };
 
 template <class Consumer>
-class SuppressIncludeNotFound : public ASTFrontendAction {
+class CommonFA : public ASTFrontendAction {
  public:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(
-      CompilerInstance &, llvm::StringRef path) override {
-    return std::make_unique<Consumer>(path.str());
+      CompilerInstance &ci, llvm::StringRef path) override {
+    return std::make_unique<Consumer>(ci, path.str());
   }
 };
 
@@ -177,6 +177,5 @@ int main(int argc, const char **argv) {
   }
   CommonOptionsParser &op = expectedParser.get();
   ClangTool tool(op.getCompilations(), op.getSourcePathList());
-  return tool.run(
-      newFrontendActionFactory<SuppressIncludeNotFound<CreateModule>>().get());
+  return tool.run(newFrontendActionFactory<CommonFA<CreateModule>>().get());
 }
