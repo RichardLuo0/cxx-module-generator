@@ -1,5 +1,5 @@
 # cxx-module-generator
-A tool to easily generate module library from traditional C++ header library.
+A tool to easily convert traditional C++ header library to module library.
 
 It converts a header file like
 ```cpp
@@ -37,8 +37,8 @@ int main() {
 By using modules, the build time decreases dramatically.
 
 ## Notice
-This tool still in early development and doesn't always work.
-* Symbol with internal linkage can not be exported.
+This tool is still in early development and doesn't always work.
+* Symbols with internal linkage can not be exported. However, a workaround is to include them in a header file. This can be enabled with `--internal-linkage-as-header` option.
 
 ## Usage
 For example, to convert boost/json.hpp, the module name is boost.json, use `cmg boost/json.hpp --name=boost.json --namespace=boost::json --`. Do not forget the `--` at the end of command. It means ignore any `compile_commands.json` in current directory (which most probably you do not have one). 

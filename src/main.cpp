@@ -1,6 +1,5 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/RecursiveASTVisitor.h>
-#include <clang/Frontend/CompilerInstance.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
 
@@ -26,15 +25,42 @@ static llvm::cl::opt<std::string> output("o",
 static llvm::cl::opt<std::string> nsFilter(
     "namespace", llvm::cl::desc("Filter symbol by namespace"),
     llvm::cl::cat(toolCategory));
+static llvm::cl::opt<bool> ilHeader(
+    "internal-linkage-as-header",
+    llvm::cl::desc("Generate internal linkage header"),
+    llvm::cl::cat(toolCategory));
 
 class ModuleWrapper {
  private:
-  fs::path file;
+  const fs::path file;
 
   struct Ns {
     std::unordered_set<std::string> symbols;
     std::unordered_map<std::string, Ns> nss;
-  } topLevel;
+
+    Ns &operator[](const auto &name) { return nss[std::string(name)]; }
+
+    Ns &getNs(const auto &nss) {
+      std::reference_wrapper<Ns> cur = *this;
+      for (auto &ns : nss) {
+        cur = cur.get()[ns];
+      }
+      return cur;
+    }
+
+    std::string toString(bool isExport = true) const {
+      std::string content;
+      for (const std::string &symbol : symbols) {
+        content += (isExport ? "export " : "") + symbol + ";\n";
+      }
+      for (const auto &ns : nss) {
+        content += "namespace " + ns.first + " {\n";
+        content += ns.second.toString(isExport);
+        content += "}\n";
+      }
+      return content;
+    }
+  } topLevel, ilNs;
 
  public:
   ModuleWrapper(const fs::path &file) : file(file) {}
@@ -48,40 +74,38 @@ class ModuleWrapper {
       std::string_view nsSv(ns.begin(), ns.end());
       if (nsSv != "(anonymous namespace)") qNameSplit.emplace_back(nsSv);
     }
-    std::string symbol;
-    std::reference_wrapper<Ns> cur = topLevel;
-    for (auto &ns : qNameSplit | std::views::take(qNameSplit.size() - 1)) {
-      cur = cur.get().nss[std::string(ns)];
-      symbol += std::string(ns) + "::";
-    }
-    symbol += qNameSplit.back();
+    const auto qNameNs = qNameSplit | std::views::take(qNameSplit.size() - 1);
 
     if (decl->getLinkageInternal() == Linkage::Internal) {
-      llvm::errs() << qName + " has internal linkage. Skipping.\n";
-    } else
-      cur.get().symbols.emplace("using " + symbol);
+      if (ilHeader) {
+        auto &ns = ilNs.getNs(qNameNs);
+        std::string symbol;
+        llvm::raw_string_ostream rso(symbol);
+        decl->print(rso);
+        ns.symbols.emplace(symbol);
+      } else
+        llvm::errs() << qName + " has internal linkage. Skipping.\n";
+    } else {
+      auto &ns = topLevel.getNs(qNameNs);
+      std::stringstream symbol;
+      std::ranges::copy(qNameNs,
+                        std::ostream_iterator<std::string_view>(symbol, "::"));
+      symbol << qNameSplit.back();
+      ns.symbols.emplace("using " + symbol.str());
+    }
   }
 
- private:
-  std::string nsToString(const Ns &ns) const {
-    std::string content;
-    for (const std::string &symbol : ns.symbols) {
-      content += "export " + symbol + ";\n";
-    }
-    for (const auto &ns : ns.nss) {
-      content += "namespace " + ns.first + " {\n";
-      content += nsToString(ns.second);
-      content += "}\n";
-    }
-    return content;
-  }
-
- public:
   std::string toString(const std::string &name) const {
     std::string content;
     content += "module;\n#include \"" + file.generic_string() + "\"\n";
     content += "export module " + name + ";\n";
-    content += nsToString(topLevel);
+    content += topLevel.toString();
+    return content;
+  }
+
+  std::string ilToString() const {
+    std::string content;
+    content += ilNs.toString(false);
     return content;
   }
 };
@@ -135,7 +159,7 @@ class FindAllSymbols : public RecursiveASTVisitor<FindAllSymbols> {
 
 class CreateModule : public ASTConsumer {
  private:
-  fs::path modulePath;
+  const fs::path modulePath;
   ModuleWrapper wrapper;
   FindAllSymbols visitor;
 
@@ -147,11 +171,18 @@ class CreateModule : public ASTConsumer {
 
   ~CreateModule() {
     fs::create_directories(modulePath.parent_path());
+
     std::ofstream os{modulePath, std::ios::binary};
     os.exceptions(std::ios::failbit);
     os << wrapper.toString(!moduleName.empty()
                                ? moduleName.getValue()
                                : modulePath.stem().generic_string());
+    if (ilHeader) {
+      std::ofstream os{fs::path(modulePath).replace_extension("hpp"),
+                       std::ios::binary};
+      os.exceptions(std::ios::failbit);
+      os << wrapper.ilToString();
+    }
   }
 
   void HandleTranslationUnit(ASTContext &ctx) override {
