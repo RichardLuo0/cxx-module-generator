@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "test",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${env:MSYS2_HOME}/clang64/bin/cmg.exe",
+      "args": [
+        "test.hpp",
+        "--namespace=A::B",
+        "--o=out",
+        "--"
+      ],
+      "cwd": "${workspaceFolder}/tests"
+    },
+    {
+      "name": "boost.json",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${env:MSYS2_HOME}/clang64/bin/cmg.exe",
+      "args": [
+        "${env:MSYS2_HOME}/clang64/include/boost/json.hpp",
+        "--name=boost.json",
+        "--namespace=boost::json",
+        "--o=out",
+        "--internal-linkage-as-header",
+        "--"
+      ],
+      "cwd": "${workspaceFolder}/tests"
+    }
+  ]
+}

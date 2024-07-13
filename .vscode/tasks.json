@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "make.cpp -g --compile-commands; cp ./.build/compile_commands.json .; cp ./build/cmg.exe ${env:MSYS2_HOME}/clang64/bin",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "clear": true
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

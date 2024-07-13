@@ -2,6 +2,7 @@
 !.clang-format
 !.gitignore
 !.clangd
+!.vscode
 build
 tests
 compile_commands.json

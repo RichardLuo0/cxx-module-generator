@@ -17,7 +17,7 @@ into
 // lib.cppm
 module;
 #include "lib.hpp"
-export module test;
+export module lib;
 namespace A {
 namespace B {
 export using A::B::C;
@@ -25,16 +25,17 @@ export using A::B::C;
 }
 ```
 Then you can use `clang++ -march=native -std=c++20 --precompile -c lib.cppm -o lib.pcm` to convert the cppm into pcm.\
-At last, you can use the pcm as a C++20 module:
+After that use `clang++ -march=native -std=c++20 -c lib.pcm` to generate .obj file (contains only module initializer), link it with your obj files to create an executable.
+Finally, you can use the library as a C++20 module:
 ```cpp
-import test;
+import lib;
 
 int main() {
   A::B::C c;
   return 0;
 }
 ```
-By using modules, the build time decreases dramatically.
+By using modules, the build time can be reduced dramatically.
 
 ## Notice
 This tool is still in early development and doesn't always work.
